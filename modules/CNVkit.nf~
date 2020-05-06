@@ -1,0 +1,187 @@
+nextflow.preview.dsl=2
+
+params.hello = 'yes'
+capture1 = 'v2'
+capture2 = 'v3'
+capture3 = 'v3+UTR'
+params.refFlat = 's3://fh-pi-nelson-p/james/references/hg38/refFlat.txt.gz'
+
+process target_CNVkit {
+	container 'etal/cnvkit'
+
+	input:
+	tuple val(kitID), path(bed_file)
+	output:
+		
+
+	"""
+	cnvkit.py target ${bed_file} --annotate refFlat.txt --split -o ${kitID}_target.bed
+	"""
+
+}
+
+
+process access_CNVkit {
+	container 'etal/cnvkit'
+
+	input:
+	output:
+
+	"""
+	cnvkit.py access hg38.fa -x excludes.bed -o access-excludes.hg38.bed
+	"""
+
+}
+
+process tag {
+        container 'etal/cnvkit'
+	errorStrategy { sleep(Math.pow(2, task.attempt) * 200 as long); return 'retry' }
+        maxRetries 100
+
+        input:
+	tuple val(sampleID), val(kitID), val(type),  file(bam)
+
+
+        output:
+	tuple val("${sampleID}"), val("${type}"), val("${kitID}"), file("${sampleID}_${type}.bam")
+
+
+        """
+	mv ${bam} ${sampleID}_${type}.bam
+        """
+
+
+}
+
+//
+// 	     --access data/access-5kb-mappable.hg19.bed \
+process batch_CNVkit {
+	container 'etal/cnvkit'
+        errorStrategy { sleep(Math.pow(2, task.attempt) * 200 as long); return 'retry' }
+        maxRetries 100
+
+	input:
+	tuple val(kitID), file(bed), file(bams)
+	path reference
+	path refFlat
+	
+	output:
+	
+
+	"""
+	cnvkit.py batch *Tumor.bam \
+            --normal *Normal.bam \
+	    --targets my_baits.bed \
+	    --annotate ${refFlat} \
+   	     --fasta ${reference} \
+    	     --output-reference ${kitID}.cnn \
+	     --output-dir cnvkitresults / \
+    	     --diagram --scatter \
+	     -p ${task.cpus} \
+	     -y \
+	     --drop-low-coverage \
+
+	"""
+
+}
+
+workflow CNVkit_wf {
+
+         take:
+         bams_ch
+         beds_ch
+         reference
+//         reference_dict
+ //        reference_index
+   //      common_variants
+     //    common_variants_index
+
+
+
+		 
+		
+	 
+	 main:
+//I need to separate by kitID and by tumor and normal
+
+	 
+	 tagged_bams = tag(bams_ch)
+
+	 
+	 kit_id_bams =  tagged_bams.map { r -> [r[2], r[1], r[0], r[3]] }.groupTuple().map { r -> [r[0], r[3]] }
+
+	 
+	 beds_and_bams = beds_ch.cross(kit_id_bams).map{ r -> [r[0][0], r[0][1], r[1][1]] }
+	
+	 batch_CNVkit(beds_and_bams, reference, params.refFlat)
+
+//	 batch_CNVkit.out.view()
+
+
+/*	
+	CollectAllelicCounts(crossed.filter { it[1] == 'Tumor' }, reference, reference_index, reference_dict)
+
+	normies = CollectReadCounts.out.filter { it[1] == 'Normal'}.map { r -> [r[2], r[3]] }.groupTuple()
+
+        tumors = CollectReadCounts.out.filter { it[1] == 'Tumor'}.map { r -> [r[2], r[0], r[3]] }
+	//could replace the following janky code with a join
+	normal_and_annotations = normies.cross(AnnotateIntervals.out).map{ r -> [r[0][0], r[0][1], r[1][1]] }
+
+
+
+	CreateReadCountPanelOfNormals(normal_and_annotations)
+
+	tumors_norm_ch = CreateReadCountPanelOfNormals.out.cross(tumors).map {r -> r.flatten()}
+	 						     .map { r -> [r[0], r[1], r[3], r[4]] }
+	 	 
+	DenoiseReadCounts(tumors_norm_ch)
+
+	CreateSequenceDictionary(reference)
+
+	PlotDenoisedCopyRatios(DenoiseReadCounts.out, CreateSequenceDictionary.out)
+
+	ModelSegments(DenoiseReadCounts.out.join(CollectAllelicCounts.out))
+
+	CallCopyRatioSegments(ModelSegments.out)
+
+	getSeg(ModelSegments.out)
+	
+	run_gistic(getSeg.out.collect())
+
+	modPlotData = ModelSegments.out.join(DenoiseReadCounts.out.map { r -> [r[0], r[2]] })
+
+
+        PlotModeledSegments(modPlotData, CreateSequenceDictionary.out)
+        DownloadData()
+  //      FuncotateSegments(ModelSegments.out, reference, reference_dict, reference_index, DownloadData.out)
+	
+	 emit:
+	        plots = PlotDenoisedCopyRatios.out
+                modelsegs = ModelSegments.out
+                denoised = DenoiseReadCounts.out
+                modelPlots = PlotModeledSegments.out
+		calledSegs = CallCopyRatioSegments.out
+//                func = FuncotateSegments.out
+		download = DownloadData.out
+		segs = getSeg.out
+		gistic = run_gistic.out
+*/
+}
+
+
+workflow {
+	        
+	 beds_ch = Channel
+            .fromPath(params.input_beds)
+            .splitCsv(header:true)
+            .map{ row-> tuple(row.kitID, file(row.capture_bed)) }
+
+	 bams_ch = Channel
+	    .fromPath(params.input_csv)
+	    .splitCsv(header:true)
+	    .map{ row-> tuple(row.sampleID, row.kitID, row.type, file(row.bam)) }
+
+	 main:
+
+	 CNVkit_wf(bams_ch, beds_ch, reference
+}

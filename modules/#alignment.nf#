@@ -1,0 +1,180 @@
+
+
+process bwa_index {
+        container "fredhutch/bwa:0.7.17"
+	publishDir "
+        afterScript "rm *"
+
+        input:
+        file combined_reference
+
+        output:
+        file "*.{amb,ann,bwt,pac,sa,alt}"
+
+        script:
+        """
+        bwa index $combined_reference
+	"""
+}
+
+process bwa_mem {
+        afterScript "rm *"
+        container "fredhutch/bwa:0.7.17"
+        errorStrategy 'ignore'
+
+        input:
+        tuple val(sampleID), file(R1), file(R2), 
+        file ref
+        file bwa_ind
+	val ref_name
+
+        output:
+        tuple val("${sampleID}_${ref_name}"), file("${sampleID}.sam")
+
+        """
+        bwa mem -R '@RG\\tID:${params.run}\\tLB:hg38\\tPL:Illumina\\tPU:barcode\\tSM:${params.run}' -t 3  ${ref} ${R1} ${R2} > ${sampleID}_${ref_name}.sam
+	"""
+}
+
+
+process sam_to_bam {
+        container "fredhutch/bwa:0.7.17-samtools-1.10"
+        afterScript "rm *"
+        errorStrategy 'ignore'
+
+        input:
+        tuple val(sampleID), file(sam_file)
+
+        output:
+        tuple val("${sampleID}"), file("${sampleID}.bam")
+
+        """
+        samtools view -bhS ${sam_file} > ${sampleID}.bam
+        """
+}
+
+process picard_clean {
+        container 'broadinstitute/gatk:4.1.4.1'
+        afterScript "rm *"
+        errorStrategy 'ignore'
+
+        input:
+        tuple val(sampleID), file(bam_q_file)
+
+        output:
+        tuple val("${sampleID}"), file("${sampleID}_q_clean.bam")
+
+        """
+        gatk --java-options "-Xmx30G" CleanSam -I ${bam_q_file} -O ${sampleID}_q_clean.bam
+        """
+}
+
+
+process sam_sort {
+        container "fredhutch/bwa:0.7.17-samtools-1.10"
+        afterScript "rm *"
+        errorStrategy 'ignore'
+
+        input:
+        tuple val(sampleID), file(bam_q_clean_file)
+
+        output:
+        tuple val("${sampleID}"), file("${sampleID}_q_clean_sorted.bam")
+
+        """
+        samtools sort ${bam_q_clean_file} -o ${sampleID}_q_clean_sorted.bam
+        """
+}
+
+
+
+process picard_duplicates {
+        container 'broadinstitute/gatk:4.1.4.1'
+        afterScript "rm *"
+        errorStrategy 'ignore'
+
+        input:
+        tuple val(sampleID), file(bam_q_clean_sorted_file)
+
+        output:
+        tuple val("${sampleID}"), file("${sampleID}_q_clean_sorted_rmdp.bam")
+
+        """
+        gatk --java-options "-Xmx30G" MarkDuplicates -I ${bam_q_clean_sorted_file} -O ${sampleID}_q_clean_sorted_rmdp.bam -METRICS_FILE {sampleID}_metrics.txt  -REMOVE_DUPLICATES true -VALIDATION_STRINGENCY STRICT -ASSUME_SORTED true -CREATE_INDEX true
+        """
+}
+
+//Base quality recalibration log-scale scoring
+process gatk_baserecalibrator {
+        container 'broadinstitute/gatk:4.1.4.1'
+        afterScript "rm *"
+        errorStrategy "ignore"
+
+
+        input:
+        tuple val(sampleID), file(sorted_bam)
+        file ref
+        file rear
+        file reference_index
+        file reference_dict
+        file rear_index
+        file indels_index
+
+        output:
+        tuple val("${sampleID}"),  file("${sampleID}_recal_data.table")
+
+        """
+        gatk BaseRecalibrator -R ${ref} -known-sites ${rear} -I ${sorted_bam} -O ${sampleID}_recal_data.table --java-options -Xmx8g
+
+        """
+}
+
+process gatk_printreads{
+        container 'broadinstitute/gatk:4.1.4.1'
+        publishDir "$params.output_folder/${sampleID}"
+        afterScript "rm *"
+
+        input:
+        tuple val(sampleID), file(precal_data), file(bam_file)
+        file reference
+        file reference_index
+        file reference_dict
+
+        output:
+        tuple val("${sampleID}"), file("${sampleID}_bqsr.bam")
+
+        """
+        gatk --java-options "-Xmx30G" ApplyBQSR -R ${reference} -I ${bam_file} -bqsr-recal-file ${precal_data} -O ${sampleID}_bqsr.bam
+        """
+}
+
+
+
+workflow vanilla_align {
+
+        get: human_fq_ch
+	     reference
+	     reference_index
+	     reference_dict
+             rear
+             rear_index
+	     indels
+             indels_index
+	     ref_name
+
+        main:
+          bwa_index(reference)
+          bwa_mem(human_fq_ch, reference, bwa_index.out, ref_name)
+          sam_to_bam(bwa_mem.out)
+          bam_filtering(sam_to_bam.out)
+          picard_clean(bam_filtering.out)
+          sam_sort(bam_filtering.out)
+          picard_duplicates(sam_sort.out)
+          gatk_baserecalibrator(picard_duplicates.out, reference, rear, reference_index, reference_dict, rear_index, indels_index)
+          gatk_printreads(gatk_baserecalibrator.out.join(picard_duplicates.out), reference, reference_index, reference_dict)
+
+        emit:
+          raw_bams = bwa_mem.out
+          recal_bams = gatk_printreads.out
+}
+

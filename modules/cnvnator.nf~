@@ -1,0 +1,125 @@
+
+
+
+
+
+process ReadMapping {
+	publishDir "$params.output_folder/${sampleID}"
+	container "hmartiniano/docker_cnvnator"
+	afterScript "rm *"
+	
+	input:
+	tuple val(sampleID), file(bam_file) 
+
+	output:
+	tuple val("${sampleID}"), path("${sampleID}.root") 
+
+	"""
+	cnvnator -root ${sampleID}.root -tree ${bam_file} -chrom 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 20 21 22 X Y
+	"""
+	
+}
+
+process Histogram {
+	publishDir "$params.output_folder/${sampleID}"
+        container "hmartiniano/docker_cnvnator"
+	afterScript "rm	*"
+
+	input:
+	tuple val(sampleID), file(root) from roots_ch
+	file reference
+
+	output:
+	tuple  val("${sampleID}"), path("${sampleID}.root")
+
+	"""
+	cnvnator -root ${root} -his 100 -fasta ${reference}
+	"""
+
+}
+
+
+process Statistics {
+	publishDir "$params.output_folder/${sampleID}"
+        container "hmartiniano/docker_cnvnator"
+	afterScript "rm *"
+
+	input:
+	tuple val(sampleID), file(root) 
+
+	output:
+	tuple val("${sampleID}"), path("${sampleID}.root") 
+	
+	"""
+	cnvnator -root ${root}  -stat 100
+	"""
+}
+
+
+process RDSignalPartition {
+	publishDir "$params.output_folder/${sampleID}"
+        container "hmartiniano/docker_cnvnator"
+	afterScript "rm *"
+
+	input:
+	tuple val(sampleID), file(root) 
+
+	output:
+        tuple val("${sampleID}"), path("${sampleID}.root")
+
+	"""
+	cnvnator -root ${root} -partition 100
+	"""
+}
+
+process CNVCall {
+	publishDir "$params.output_folder/${sampleID}"
+        container "hmartiniano/docker_cnvnator"
+	afterScript "rm *"
+
+	input:
+	tuple val(sampleID), file(root) 
+
+	output:
+	tuple val("${sampleID}"), file("${sampleID}_cnv.txt"), file("${sampleID}.root")
+	
+	"""
+	cnvnator -root ${root} -call 100 > ${sampleID}_cnv.txt
+	"""
+}
+
+process CnvnatorAnnotater {
+        publishDir "$params.output_folder/${sampleID}"
+        container "r-base:3.6.2"
+        afterScript "rm *"
+	
+	input:
+	tuple val(sampleID), file(cnv_file), file(root)
+
+	output:
+	file("${sampleID}_annotated_cnvnator.txt")
+
+	"""
+	Rscript ${cnv_annotater} ${cnv_file} ${sampleID}
+	"""
+}
+
+workflow cnvnator_wf {
+	 
+	 // needs to have sampleID and bamfile
+	 get: bams_ch 
+	 
+	 main:
+	 ReadMapping(bams_ch)
+	 Histogram(ReadMapping.out, reference)
+	 Statistics(Histogram.out)
+	 RDSignalPartition(Statistics.out)
+	 CNVCall(RDSignalPartition.out)
+	 // CnvnatorAnnotater(CNVCall.out)
+
+	 emit:
+	 raw_cnvnator = CNVCall.out
+//	 annotated_cnvnator = CnvnatorAnnotater.out
+	 
+	   
+}
