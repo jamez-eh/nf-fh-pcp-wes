@@ -115,12 +115,12 @@ process bwa_mem {
   	maxRetries 50
 
 	input:
-	tuple val(sampleID), val(kitID), val(type), file(R1), file(R2)
+	tuple val(sampleID), val(kitID), val(type), val(patient), file(R1), file(R2)
 	file ref 
 	file bwa_ind
 
 	output:
-	tuple val("${sampleID}"), val("${kitID}"), val("${type}"), file("${sampleID}.sam")
+	tuple val("${sampleID}"), val("${kitID}"), val("${type}"), val("${patient}"),  file("${sampleID}.sam")
 
 	"""
 	bwa mem -R '@RG\\tID:${params.run}\\tLB:hg38\\tPL:Illumina\\tPU:barcode\\tSM:${params.run}' -t 3  ${ref} ${R1} ${R2} > ${sampleID}.sam
@@ -133,10 +133,10 @@ process remove_pdx {
         maxRetries 100
 
         input:
-	tuple val(sampleID), val(kitID), val(type), file(hybrid_sam)
+	tuple val(sampleID), val(kitID), val(type), val(patient), file(hybrid_sam)
 
         output:
-	tuple val("${sampleID}"), val("${kitID}"), val("${type}"), file("${sampleID}_hum.sam")
+	tuple val("${sampleID}"), val("${kitID}"), val("${type}"), val("${patient}"),  file("${sampleID}_hum.sam")
 
 	"""
 	#awk '{ if (\$3  !="chr1_m" && \$3 != "chr2_m" && \$3 != "chr3_m" && \$3 != "chr4_m" && \$3 != "chr5_m" && \$3 != "chr6_m" && \$3 != "chr7_m" && \$3 != "chr8_m" && \$3 != "chr9_m" && \$3 != "chr1_m0" && \$3 != "chr1_m1" && \$3 != "chr1_m2" && \$3 != "chr1_m3" && \$3 != "chr1_m4" && \$3 != " chr1_m5" && \$3 != "chr1_m6" && \$3 != "chr1_m7" && \$3 != "chr1_m8" && \$3 != "chr1_m9" && \$3 != "chr2_m0" && \$3 != "chr2_m1" && \$3 != "chr2_m2" && \$3 != "chrX_m" && \$3 != "chrY_m" && \$3 != "chrM_m" ) print \$0}' ${hybrid_sam} > ${sampleID}_hum.sam
@@ -153,10 +153,10 @@ process sam2fastq {
         maxRetries 100
 
 	input:
-	tuple val(sampleID), val(kitID), val(type), file(sam_file)
+	tuple val(sampleID), val(kitID), val(type), val(patient), file(sam_file)
 
 	output:
-        tuple val("$sampleID"), val("${kitID}"), val("${type}"), file("${sampleID}_R1.fq.gz"), file("${sampleID}_R2.fq.gz")
+        tuple val("$sampleID"), val("${kitID}"), val("${type}"), val("${patient}"),  file("${sampleID}_R1.fq.gz"), file("${sampleID}_R2.fq.gz")
 
         """
 	gatk SamToFastq -I ${sam_file} \
@@ -173,10 +173,10 @@ process sam_to_bam {
         maxRetries 100
 
 	input:
-	tuple val(sampleID), val(kitID), val(type), file(sam_file) 
+	tuple val(sampleID), val(kitID), val(type), val(patient), file(sam_file) 
 	
 	output:
-	tuple val("${sampleID}"), val("${kitID}"), val("${type}"), file("${sampleID}.bam") 
+	tuple val("${sampleID}"), val("${kitID}"), val("${type}"), val("${patient}"),  file("${sampleID}.bam") 
 
 	"""
 	samtools view -bhS ${sam_file} > ${sampleID}.bam
@@ -192,10 +192,10 @@ process bam_filtering {
         maxRetries 100
 
         input:
-        tuple val(sampleID), val(kitID), val(type), file(bam_file) 
+        tuple val(sampleID), val(kitID), val(type), val(patient), file(bam_file) 
 
         output:
-        tuple val("${sampleID}"), val("${kitID}"), val("${type}"), file("${sampleID}_q.bam")
+        tuple val("${sampleID}"), val("${kitID}"), val("${type}"), val("${patient}"),  file("${sampleID}_q.bam")
 
         """
 	samtools view -bhS -q 20 ${bam_file} > ${sampleID}_q.bam
@@ -208,10 +208,10 @@ process picard_clean {
 	errorStrategy 'ignore'
 
 	input:
-	tuple val(sampleID), val(kitID), val(type), file(bam_q_file)
+	tuple val(sampleID), val(kitID), val(type), val(patient), file(bam_q_file)
 
 	output:
-	tuple val("${sampleID}"), val("${kitID}"), val("${type}"), file("${sampleID}_q_clean.bam")
+	tuple val("${sampleID}"), val("${kitID}"), val("${type}"), val("${patient}"),  file("${sampleID}_q_clean.bam")
 
 	"""
 	gatk --java-options "-Xmx30G" CleanSam -I ${bam_q_file} -O ${sampleID}_q_clean.bam
@@ -224,10 +224,10 @@ process sam_sort {
 	errorStrategy 'ignore'
 
         input:
-        tuple val(sampleID), val(kitID), val(type), file(bam_q_clean_file)
+        tuple val(sampleID), val(kitID), val(type), val(patient), file(bam_q_clean_file)
 
         output:
-	tuple val("${sampleID}"), val("${kitID}"), val("${type}"), file("${sampleID}_q_clean_sorted.bam") 
+	tuple val("${sampleID}"), val("${kitID}"), val("${type}"), val("${patient}"),  file("${sampleID}_q_clean_sorted.bam") 
 
         """
 	samtools sort ${bam_q_clean_file} -o ${sampleID}_q_clean_sorted.bam
@@ -249,10 +249,10 @@ process picard_duplicates {
         maxRetries 100
 
 	input:
-        tuple val(sampleID), val(kitID), val(type), file(bam_q_clean_sorted_file)
+        tuple val(sampleID), val(kitID), val(type), val(patient), file(bam_q_clean_sorted_file)
 
         output:
-	tuple val("${sampleID}"), val("${kitID}"), val("${type}"), file("${sampleID}_q_clean_sorted_rmdp.bam")
+	tuple val("${sampleID}"), val("${kitID}"), val("${type}"), val("${patient}"),  file("${sampleID}_q_clean_sorted_rmdp.bam")
 
         """
         gatk MarkDuplicates -I ${bam_q_clean_sorted_file} -O ${sampleID}_q_clean_sorted_rmdp.bam -METRICS_FILE {sampleID}_metrics.txt  -REMOVE_DUPLICATES true -VALIDATION_STRINGENCY STRICT -ASSUME_SORTED true -CREATE_INDEX true
@@ -268,7 +268,7 @@ process gatk_baserecalibrator {
 
 
         input:
-        tuple val(sampleID), val(kitID), val(type), file(sorted_bam)
+        tuple val(sampleID), val(kitID), val(type), val(patient), file(sorted_bam)
         file ref
         file rear
 	file reference_index
@@ -277,7 +277,7 @@ process gatk_baserecalibrator {
 	file indels_index
 
         output:
-        tuple val("${sampleID}"), val("${kitID}"), val("${type}"),  file("${sampleID}_recal_data.table") 
+        tuple val("${sampleID}"), val("${kitID}"), val("${type}"), val("${patient}"),  val(patient), file("${sampleID}_recal_data.table") 
 
         """
         gatk BaseRecalibrator -R ${ref} -known-sites ${rear} -I ${sorted_bam} -O ${sampleID}_recal_data.table --java-options -Xmx8g 
@@ -292,13 +292,13 @@ process gatk_printreads{
         maxRetries 100
 
         input:
-        tuple val(sampleID), val(kitID), val(type), file(precal_data), file(bam_file)
+        tuple val(sampleID), val(kitID), val(type), file(precal_data), val(patient), file(bam_file)
         file reference
         file reference_index
         file reference_dict
 
         output:
-        tuple val("${sampleID}"), val("${kitID}"), val("${type}"), file("${sampleID}_bqsr.bam")
+        tuple val("${sampleID}"), val("${kitID}"), val("${type}"), val("${patient}"), file("${sampleID}_bqsr.bam")
 
         """
 	echo ${kitID}
@@ -373,7 +373,7 @@ workflow {
 	fqs_ch = Channel
 	    .fromPath(params.input_csv)
 	    .splitCsv(header:true)
-	    .map{ row-> tuple(row.sampleID, row.kitID, row.type, file(row.R1), file(row.R2)) }
+	    .map{ row-> tuple(row.sampleID, row.kitID, row.type, row.patient, file(row.R1), file(row.R2)) }
 
 	beds_ch = Channel
             .fromPath(params.input_beds)
