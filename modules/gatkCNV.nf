@@ -73,14 +73,13 @@ process PreprocessIntervals {
 
 process samtoolsIndex {
 	container "fredhutch/bwa:0.7.17"	
-	errorStrategy { sleep(Math.pow(2, task.attempt) * 200 as long); return 'retry' }
-        maxRetries 100
+
 
 	input:
-	tuple val(sampleID), val(kitID), val(type), file(bam)	
+	tuple val(sampleID), val(kitID), val(type), val(patientID),  file(bam)	
 	
 	output:
-	tuple val("${sampleID}"), val("${kitID}"), val("${type}"), file("${bam}"), file("${bam}.bai")
+	tuple val("${kitID}"), val("${patientID}"), val("${type}"), val("${sampleID}"), file("${bam}"), file("${bam}.bai")
 
 
 	"""
@@ -95,13 +94,13 @@ process CollectReadCounts {
         maxRetries 100
 
         input:
-        tuple val(sampleID), val(type), file(bam), file(bam_index), val(kitID), file(capture_intervals)
+        tuple val(patientID), val(type), val(sampleID), file(bam), file(bam_index), val(kitID), file(capture_intervals)
         file reference
         //file reference_index
         //file reference_dict
 
         output:
-        tuple val("${sampleID}"), val("${type}"), val("${kitID}"), file("${sampleID}.counts.hdf5")
+        tuple val("${sampleID}"), val("${type}"), val("${kitID}"), val("$patientID}"), file("${sampleID}.counts.hdf5")
 
         """
 	gatk CollectReadCounts \
@@ -119,7 +118,7 @@ process CreateReadCountPanelOfNormals{
         maxRetries 100
 
         input:
-	tuple val(kitID),  file(normal_list), file(annotated)
+	tuple val(kitID), file(normal_list), file(annotated)
 		
         output:
 	tuple val("${kitID}"), file("${kitID}.cnv.pon.hdf5")
@@ -172,10 +171,10 @@ process DenoiseReadCounts{
         maxRetries 100
 
         input:
-	tuple val(kitID), file(pon), val(sampleID), file(counts)
+	tuple val(kitID), file(pon), val(sampleID), val(patientID), file(counts)
 	
         output:
-	tuple val("${sampleID}"), file("${sampleID}.standardizedCR.tsv"), file("${sampleID}.denoisedCR.tsv")
+	tuple val("${sampleID}"), val("${patientID}"), file("${sampleID}.standardizedCR.tsv"), file("${sampleID}.denoisedCR.tsv")
 
 	"""
 	gatk --java-options "-Xmx12g" DenoiseReadCounts \
@@ -237,13 +236,13 @@ process CollectAllelicCounts {
         maxRetries 100	
 	
 	input:
-        tuple val(sampleID), val(type), file(bam), file(bam_index), val(kitID), file(capture_intervals)
+        tuple val(patientID), val(sampleID), val(type), file(bam), file(bam_index), val(kitID), file(capture_intervals)
 	file reference
 	file reference_index
 	file reference_dict
 
 	output:
-	tuple val("${sampleID}"), file("${sampleID}.allelicCounts.tsv")
+	tuple val("${patientID}"), val("${kitID}"), val("${sampleID}"), file("${sampleID}.allelicCounts.tsv")
 
 	"""
 
@@ -282,6 +281,32 @@ process ModelSegments{
 
         """
 
+}
+
+process ModelSegmentsMatched {
+	container 'broadinstitute/gatk:4.1.4.1'
+        errorStrategy { sleep(Math.pow(2, task.attempt) * 200 as long); return 'retry' }
+        maxRetries 100
+
+        input:
+        tuple val(sampleID), file(standard), file(denoised), file(allelic), file(normal_allelic)
+
+
+        output:
+        tuple val("${sampleID}"), path("${sampleID}_modelSeg")
+
+
+        """
+        mkdir ${sampleID}_modelSeg
+
+        gatk --java-options "-Xmx30G" ModelSegments \
+          --denoised-copy-ratios ${denoised} \
+          --output-prefix ${sampleID} \
+	  --normal-allelic-counts ${normal_allelic}
+          --allelic-counts ${allelic} \
+          -O ${sampleID}_modelSeg
+
+        """
 }
 
 //takes Copy-ratio-segments .cr.seg from modelsegments
@@ -434,71 +459,82 @@ workflow gatkCNV_wf {
 		 contig_dict
 		 sams_ch
 		 bams_ch 
+		 matched
 		 
-		
-	 
 	 main:
+	 CreateSequenceDictionary(reference)
 
-	 //turn bed into interval_list format
 	 BedToIntervalList(beds_ch, reference, reference_dict)
 	 
-	 //Preprocess the interval_lists
  	 PreprocessIntervals(BedToIntervalList.out, reference, reference_dict, reference_index)
 
-	 //annotate GC content of reference file over each interval_list
 	 AnnotateIntervals(PreprocessIntervals.out, reference, reference_dict, reference_index)
 	 
-	 //create samtools Indexes for the bam file
-
 	 samtoolsIndex(bams_ch)
-
-
-
-	 bams_indexed = samtoolsIndex.out.map{ r -> [r[1], r[0], r[2], r[3], r[4]]}
 	 
-	 crossed = PreprocessIntervals.out.cross(bams_indexed).map { r -> r.flatten() }.map { r -> [r[3], r[4], r[5], r[6], r[0], r[1]] }
+	 //samtoolsIndex.out has 6 tuple with kitID, patientID ....
+	 //want to remove r[2], it is a second kitID
+	 
+	 crossed = PreprocessIntervals.out.cross(samtoolsIndex.out).map { r -> r.flatten() }.map { r -> [r[3], r[4], r[5], r[6], r[7], r[0], r[1]] }
+	 //comes out val("${kitID}"), val("${patientID}"), val("${type}"), val("${sampleID}"), file("${bam}"), file("${bam}.bai")     
+	crossed.view()
 
 
+//################   Get Read counts for normal and tumor separately, group the normals by kitID to make PON    #########################
 
 	CollectReadCounts(crossed, reference)
-	
-
-	
-	CollectAllelicCounts(crossed.filter { it[1] == 'Tumor' }, reference, reference_index, reference_dict)
-
-	normies = CollectReadCounts.out.filter { it[1] == 'Normal'}.map { r -> [r[2], r[3]] }.groupTuple()
-
+        normies = CollectReadCounts.out.filter { it[1] == 'Normal'}.map { r -> [r[2], r[3]] }.groupTuple()
         tumors = CollectReadCounts.out.filter { it[1] == 'Tumor'}.map { r -> [r[2], r[0], r[3]] }
-	//could replace the following janky code with a join
 	normal_and_annotations = normies.cross(AnnotateIntervals.out).map{ r -> [r[0][0], r[0][1], r[1][1]] }
-
-
-
 	CreateReadCountPanelOfNormals(normal_and_annotations)
-
 	tumors_norm_ch = CreateReadCountPanelOfNormals.out.cross(tumors).map {r -> r.flatten()}
-	 						     .map { r -> [r[0], r[1], r[3], r[4]] }
-	 	 
+                                                             .map { r -> [r[0], r[1], r[3], r[4]] }
+
 	DenoiseReadCounts(tumors_norm_ch)
-
-	CreateSequenceDictionary(reference)
-
 	PlotDenoisedCopyRatios(DenoiseReadCounts.out, CreateSequenceDictionary.out)
 
-	ModelSegments(DenoiseReadCounts.out.join(CollectAllelicCounts.out))
+//#######################################################################################################################################
 
-	CallCopyRatioSegments(ModelSegments.out)
 
-	getSeg(ModelSegments.out)
+
+//###########################   Get Allelic counts for normals and Tumors ################################################################
+
+	if(matched) {
+
+		
+		normalAllelicCounts = CollectAllelicCounts(crossed.filter { it[1] == 'Normal' }, reference, reference_index, reference_dict).
+		tumorAllelicCounts = CollectAllelicCounts(crossed.filter { it[1] == 'Tumor' }, reference, reference_index, reference_dict)
+
+		tumorJoinNormal = tumorAllelicCounts.out.join(normalAlleliccounts.out, remainder: false, by : [0,1])
+				  						       		  .map { r -> [r[2], r[3], r[5]] }
+		
+		denoisedJoinAllelic = DenoiseReadCounts.out.join(tumorJoinNormal)
+
+		modeled = ModelSegmentsMatched(denoisedJoinAllelic)
+	}
+	else {	
+	        AllelicCounts = CollectAllelicCounts(crossed, reference, reference_index, reference_dict)
+       	        modeled = ModelSegments(DenoiseReadCounts.out.join(AllelicCounts))
+	}
+
+//#######################################################################################################################################	 	 
+
+
+
+//####################################   Call and Plot modelled segments ###############################################################
 	
-	run_gistic(getSeg.out.collect())
-
-	modPlotData = ModelSegments.out.join(DenoiseReadCounts.out.map { r -> [r[0], r[2]] })
-
-
+	CallCopyRatioSegments(modeled)
+	modPlotData = modeled.join(DenoiseReadCounts.out.map { r -> [r[0], r[2]] })
         PlotModeledSegments(modPlotData, CreateSequenceDictionary.out)
-        DownloadData()
-  //      FuncotateSegments(ModelSegments.out, reference, reference_dict, reference_index, DownloadData.out)
+
+//#######################################################################################################################################	 	 
+
+
+//	getSeg(modeled)
+//	run_gistic(getSeg.out.collect())
+//      DownloadData()
+//      FuncotateSegments(modeled, reference, reference_dict, reference_index, DownloadData.out)
+
 	
 	 emit:
 	        plots = PlotDenoisedCopyRatios.out
@@ -506,10 +542,10 @@ workflow gatkCNV_wf {
                 denoised = DenoiseReadCounts.out
                 modelPlots = PlotModeledSegments.out
 		calledSegs = CallCopyRatioSegments.out
-//                func = FuncotateSegments.out
 		download = DownloadData.out
 		segs = getSeg.out
 		gistic = run_gistic.out
+//              func = FuncotateSegments.out
 
 }
 
@@ -531,23 +567,24 @@ workflow {
          reference = file(params.reference)
          contig_dict = file(params.contig_dict)
 
-
+	 matched = params.matched
 
         bams_ch = Channel
             .fromPath(params.input_csv)
             .splitCsv(header:true)
-            .map{ row-> tuple(row.sampleID, row.kitID, row.type, file(row.bam)) }
+            .map{ row-> tuple(row.sampleID, row.kitID, row.type, row.patientID, file(row.bam)) }
 
         beds_ch = Channel
             .fromPath(params.input_beds)
             .splitCsv(header:true)
             .map{ row-> tuple(row.kitID, file(row.capture_bed)) }
-
+	
+	
         sams_ch = Channel.empty()
 
         main:
 
-          gatkCNV_wf(beds_ch, reference, reference_dict, reference_index, contig_dict, sams_ch, bams_ch)
+          gatkCNV_wf(beds_ch, reference, reference_dict, reference_index, contig_dict, sams_ch, bams_ch, matched)
 
 
         publish:
