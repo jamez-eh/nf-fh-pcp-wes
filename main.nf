@@ -21,12 +21,7 @@ reference = file(params.reference)
 contig_dict = file(params.contig_dict)
 
 
-        beds_ch = Channel
-            .fromPath(params.input_beds)
-            .splitCsv(header:true)
-            .map{ row-> tuple(row.kitID, file(row.capture_bed)) }
 
-beds_ch.view()
 
 /*
 include './modules/cnvnator' params (
@@ -50,7 +45,7 @@ include './modules/single_varfilter.nf' params (
 )
 */
 
-include CNVkit_wf from './modules/CNVkit.nf'
+//include CNVkit_wf from './modules/CNVkit.nf'
 include gatkCNV_wf from './modules/gatkCNV.nf'
 include mutect2_wf from './modules/mutect2.nf'
 
@@ -345,7 +340,7 @@ workflow vanilla_align {
 	  gatk_printreads(gatk_baserecalibrator.out.join(picard_duplicates.out, by : [0,1,2]), reference, reference_index, reference_dict)
 	
 	emit:
-	  raw_bams = bwa_mem.out
+	  raw_bams = sam_to_bam.out
 	  recal_bams = gatk_printreads.out
 }
 
@@ -370,20 +365,25 @@ workflow {
 	 common_variants = file(params.common_variants)
 	 common_variants_index = file(params.common_variants_index)
 
+	 
+
 	fqs_ch = Channel
 	    .fromPath(params.input_csv)
 	    .splitCsv(header:true)
 	    .map{ row-> tuple(row.sampleID, row.kitID, row.type, row.patient, file(row.R1), file(row.R2)) }
 
+	if (params.cnv || params.mutect2) {
 	beds_ch = Channel
-            .fromPath(params.input_beds)
-            .splitCsv(header:true)
-            .map{ row-> tuple(row.kitID, file(row.capture_bed)) }
-
+       	     .fromPath(params.input_beds)
+             .splitCsv(header:true)
+             .map{ row-> tuple(row.kitID, file(row.capture_bed)) }
+	}
         bam_bam = Channel.empty()
 
 
 	main:
+
+
 
 	fqs_ch.branch {
                 Normal : it[2] == 'Normal'
@@ -415,31 +415,33 @@ workflow {
 	//gatk_single_snp_wf(vanilla_align.out.recal_bams)
 
 
-	CNVkit_wf(vanilla_align.out.recal_bams, beds_ch, reference, reference_dict, reference_index, common_variants, common_variants_index)
-
-        gatkCNV_wf(beds_ch, reference, reference_dict, reference_index, contig_dict, vanilla_align.out)
+	//CNVkit_wf(vanilla_align.out.recal_bams, beds_ch, reference, reference_dict, reference_index, common_variants, common_variants_index)
 	
+	if(params.cnv){
+        gatkCNV_wf(beds_ch, reference, reference_dict, reference_index, contig_dict, vanilla_align.out)
+	}
+	if(params.mutect2){
 	mutect2_wf(vanilla_align.out.recal_bams, beds_ch, reference, reference_dict, reference_index, common_variants, common_variants_index)
-
+	}
 	
 
 	publish:
 	pdx.mixed_bams to : "${params.output_folder}/mixed_bams/"
 	vanilla_align.out.raw_bams to: "${params.output_folder}raw/"
 	vanilla_align.out.recal_bams to: "${params.output_folder}recal_bams/"
-	gatkCNV_wf.out.plots to : "./lucap_plots/"	  
-	gatkCNV_wf.out.plots to : "${params.output_folder}denoised/"	  
- 	gatkCNV_wf.out.modelsegs to : "${params.output_folder}modelsegs"	  
-	gatkCNV_wf.out.modelPlots to : "./lucap_modplots/"	  
+//	gatkCNV_wf.out.plots to : "./lucap_plots/"	  
+//	gatkCNV_wf.out.plots to : "${params.output_folder}denoised/"	  
+ //	gatkCNV_wf.out.modelsegs to : "${params.output_folder}modelsegs"	  
+//	gatkCNV_wf.out.modelPlots to : "./lucap_modplots/"	  
 //	gatkCNV_wf.out.func to : './func/'
-	gatkCNV_wf.out.calledSegs to : '/fh/scratch/delete90/nelson_p/james/funcotating/calledSegs/'
-	gatkCNV_wf.out.modelsegs to : '/fh/scratch/delete90/nelson_p/james/funcotating/modelSegs/'
-	gatkCNV_wf.out.download to : '/fh/scratch/delete90/nelson_p/james/funcotating/data/'
-	mutect2_wf.out.annotated to : '/fh/scratch/delete90/nelson_p/james/funcotating/mutect2/MAFS/'
-	mutect2_wf.out.vcf to : '/fh/scratch/delete90/nelson_p/james/funcotating/mutect2/VCF/'
-	mutect2_wf.out.filteredVCF to : '/fh/scratch/delete90/nelson_p/james/funcotating/mutect2/filteredVCF/'
-	gatkCNV_wf.out.segs to : '/fh/scratch/delete90/nelson_p/james/funcotating/segs/'
-	gatkCNV_wf.out.gistic to : '/fh/scratch/delete90/nelson_p/james/funcotating/gistic/'
+//	gatkCNV_wf.out.calledSegs to : '/fh/scratch/delete90/nelson_p/james/funcotating/calledSegs/'
+//	gatkCNV_wf.out.modelsegs to : '/fh/scratch/delete90/nelson_p/james/funcotating/modelSegs/'
+//	gatkCNV_wf.out.download to : '/fh/scratch/delete90/nelson_p/james/funcotating/data/'
+//	mutect2_wf.out.annotated to : '/fh/scratch/delete90/nelson_p/james/funcotating/mutect2/MAFS/'
+//	mutect2_wf.out.vcf to : '/fh/scratch/delete90/nelson_p/james/funcotating/mutect2/VCF/'
+//	mutect2_wf.out.filteredVCF to : '/fh/scratch/delete90/nelson_p/james/funcotating/mutect2/filteredVCF/'
+//	gatkCNV_wf.out.segs to : '/fh/scratch/delete90/nelson_p/james/funcotating/segs/'
+//	gatkCNV_wf.out.gistic to : '/fh/scratch/delete90/nelson_p/james/funcotating/gistic/'
 }
 
 
