@@ -69,7 +69,7 @@ process batch_CNVkit {
 	path refFlat
 	
 	output:
-	tuple val("${kitID}"), path(${kitID}_cnvkit)
+	tuple val("${kitID}"), path("${kitID}_cnvkit")
 
 	"""
 	cnvkit.py batch *Tumor.bam \
