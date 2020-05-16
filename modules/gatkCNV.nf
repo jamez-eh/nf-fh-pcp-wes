@@ -8,6 +8,7 @@ capture3 = 'v3+UTR'
 
 process DownloadData {
         container 'broadinstitute/gatk:4.1.4.1'
+	label 'small'
         errorStrategy { sleep(Math.pow(2, task.attempt) * 200 as long); return 'retry' }
         maxRetries 100
 
@@ -25,6 +26,7 @@ process DownloadData {
 
 process BedToIntervalList {
         container 'broadinstitute/gatk:4.1.4.1'
+	label 'small'
         errorStrategy { sleep(Math.pow(2, task.attempt) * 200 as long); return 'retry' }
         maxRetries 100
 
@@ -49,6 +51,7 @@ process BedToIntervalList {
 
 process PreprocessIntervals {
         container 'broadinstitute/gatk:4.1.4.1'
+	label 'small'
         errorStrategy { sleep(Math.pow(2, task.attempt) * 200 as long); return 'retry' }
         maxRetries 100
 
@@ -73,7 +76,7 @@ process PreprocessIntervals {
 
 process samtoolsIndex {
 	container "fredhutch/bwa:0.7.17"	
-
+	label 'small'
 
 	input:
 	tuple val(sampleID), val(kitID), val(type), val(patientID),  file(bam)	
@@ -90,6 +93,7 @@ process samtoolsIndex {
 
 process CollectReadCounts {
         container 'broadinstitute/gatk:4.1.4.1'
+	label 'small'
 	errorStrategy { sleep(Math.pow(2, task.attempt) * 200 as long); return 'retry' }
         maxRetries 100
 
@@ -100,7 +104,7 @@ process CollectReadCounts {
         //file reference_dict
 
         output:
-        tuple val("${sampleID}"), val("${type}"), val("${kitID}"), val("$patientID}"), file("${sampleID}.counts.hdf5")
+        tuple val("${sampleID}"), val("${type}"), val("${kitID}"), val("${patientID}"), file("${sampleID}.counts.hdf5")
 
         """
 	gatk CollectReadCounts \
@@ -114,6 +118,7 @@ process CollectReadCounts {
 
 process CreateReadCountPanelOfNormals{
         container 'broadinstitute/gatk:4.1.4.1'
+	label 'large'
         errorStrategy { sleep(Math.pow(2, task.attempt) * 200 as long); return 'retry' }
         maxRetries 100
 
@@ -142,6 +147,7 @@ process CreateReadCountPanelOfNormals{
 
 process AnnotateIntervals {
         container 'broadinstitute/gatk:4.1.4.1'
+	label 'small'
         errorStrategy { sleep(Math.pow(2, task.attempt) * 200 as long); return 'retry' }
         maxRetries 100
 
@@ -165,8 +171,11 @@ process AnnotateIntervals {
 }
 
 
+//[v3, /fh/scratch/delete90/nelson_p/james/pdx/matched/work/cc/75db32bcb333798eac12dd815abd2f/v3.cnv.pon.hdf5, Sample_173-2, 13-084]
+
 process DenoiseReadCounts{
         container 'broadinstitute/gatk:4.1.4.1'
+	label 'small'
         errorStrategy { sleep(Math.pow(2, task.attempt) * 200 as long); return 'retry' }
         maxRetries 100
 
@@ -187,6 +196,7 @@ process DenoiseReadCounts{
 
 process CreateSequenceDictionary {
         container 'broadinstitute/gatk:4.1.4.1'
+	label 'small'
         errorStrategy { sleep(Math.pow(2, task.attempt) * 200 as long); return 'retry' }
         maxRetries 100
 
@@ -205,6 +215,7 @@ process CreateSequenceDictionary {
 
 process PlotDenoisedCopyRatios{
         container 'broadinstitute/gatk:4.1.4.1'
+	label 'small'
         errorStrategy { sleep(Math.pow(2, task.attempt) * 200 as long); return 'retry' }
         maxRetries 100
 
@@ -232,17 +243,18 @@ process PlotDenoisedCopyRatios{
 
 process CollectAllelicCounts {
 	container 'broadinstitute/gatk:4.1.4.1'
+	label 'small'
         errorStrategy { sleep(Math.pow(2, task.attempt) * 200 as long); return 'retry' }
         maxRetries 100	
 	
 	input:
-        tuple val(patientID), val(sampleID), val(type), file(bam), file(bam_index), val(kitID), file(capture_intervals)
+        tuple val(patientID), val(type), val(sampleID), file(bam), file(bam_index), val(kitID), file(capture_intervals)
 	file reference
 	file reference_index
 	file reference_dict
 
 	output:
-	tuple val("${patientID}"), val("${kitID}"), val("${sampleID}"), file("${sampleID}.allelicCounts.tsv")
+	tuple val("${patientID}"), val("${type}"), val("${kitID}"), val("${sampleID}"), file("${sampleID}.allelicCounts.tsv")
 
 	"""
 
@@ -259,6 +271,7 @@ process CollectAllelicCounts {
 //ADD CollectAllelicCounts.out to input 
 // takes tuple in shape of DenoiseReadCounts.out
 process ModelSegments{
+	label 'large'
         container 'broadinstitute/gatk:4.1.4.1'
         errorStrategy { sleep(Math.pow(2, task.attempt) * 200 as long); return 'retry' }
         maxRetries 100
@@ -285,8 +298,9 @@ process ModelSegments{
 
 process ModelSegmentsMatched {
 	container 'broadinstitute/gatk:4.1.4.1'
-        errorStrategy { sleep(Math.pow(2, task.attempt) * 200 as long); return 'retry' }
-        maxRetries 100
+	label 'large'
+//        errorStrategy { sleep(Math.pow(2, task.attempt) * 200 as long); return 'retry' }
+//        maxRetries 100
 
         input:
         tuple val(sampleID), file(standard), file(denoised), file(allelic), file(normal_allelic)
@@ -302,7 +316,7 @@ process ModelSegmentsMatched {
         gatk --java-options "-Xmx30G" ModelSegments \
           --denoised-copy-ratios ${denoised} \
           --output-prefix ${sampleID} \
-	  --normal-allelic-counts ${normal_allelic}
+	  --normal-allelic-counts ${normal_allelic} \
           --allelic-counts ${allelic} \
           -O ${sampleID}_modelSeg
 
@@ -312,6 +326,7 @@ process ModelSegmentsMatched {
 //takes Copy-ratio-segments .cr.seg from modelsegments
 process CallCopyRatioSegments {
 	container 'broadinstitute/gatk:4.1.4.1'
+	label 'small'
         errorStrategy { sleep(Math.pow(2, task.attempt) * 200 as long); return 'retry' }
         maxRetries 100
 
@@ -361,6 +376,7 @@ process PlotModeledSegments {
 
 process FuncotateSegments{
         container 'broadinstitute/gatk:4.1.4.1'
+	label 'small'
         errorStrategy { sleep(Math.pow(2, task.attempt) * 200 as long); return 'retry' }
         maxRetries 100
 
@@ -477,21 +493,31 @@ workflow gatkCNV_wf {
 	 
 	 crossed = PreprocessIntervals.out.cross(samtoolsIndex.out).map { r -> r.flatten() }.map { r -> [r[3], r[4], r[5], r[6], r[7], r[0], r[1]] }
 	 //comes out val("${kitID}"), val("${patientID}"), val("${type}"), val("${sampleID}"), file("${bam}"), file("${bam}.bai")     
-	crossed.view()
+
 
 
 //################   Get Read counts for normal and tumor separately, group the normals by kitID to make PON    #########################
 
 	CollectReadCounts(crossed, reference)
-        normies = CollectReadCounts.out.filter { it[1] == 'Normal'}.map { r -> [r[2], r[3]] }.groupTuple()
-        tumors = CollectReadCounts.out.filter { it[1] == 'Tumor'}.map { r -> [r[2], r[0], r[3]] }
+
+	// [15-003C1_NORMAL_MUSCLE, Normal, v3+UTR, 15-003}, /fh/scratch/delete90/nelson_p/james/pdx/matched/work/f9/8583f365314577e9384008da871963/15-003C1_NORMAL_MUSCLE.counts.hdf5]
+
+        normies = CollectReadCounts.out.filter { it[1] == 'Normal'}.map { r -> [r[2], r[4]] }.groupTuple()
+
+        tumors = CollectReadCounts.out.filter { it[1] == 'Tumor'}.map { r -> [r[2], r[0], r[3], r[4]] }
+
+	//tumors.view()
+	//[v3+UTR, Sample_147CR, 05-165, /fh/scratch/delete90/nelson_p/james/pdx/matched/work/c6/a74b5574725900f91fff3dc2842dcc/Sample_147CR.counts.hdf5]
+
+
 	normal_and_annotations = normies.cross(AnnotateIntervals.out).map{ r -> [r[0][0], r[0][1], r[1][1]] }
 	CreateReadCountPanelOfNormals(normal_and_annotations)
 	tumors_norm_ch = CreateReadCountPanelOfNormals.out.cross(tumors).map {r -> r.flatten()}
-                                                             .map { r -> [r[0], r[1], r[3], r[4]] }
+                                                             .map { r -> [r[0], r[1], r[3], r[4], r[5]] }
+
 
 	DenoiseReadCounts(tumors_norm_ch)
-	PlotDenoisedCopyRatios(DenoiseReadCounts.out, CreateSequenceDictionary.out)
+	PlotDenoisedCopyRatios(DenoiseReadCounts.out.map{r -> [r[0], r[2], r[3]] }, CreateSequenceDictionary.out)
 
 //#######################################################################################################################################
 
@@ -500,20 +526,24 @@ workflow gatkCNV_wf {
 //###########################   Get Allelic counts for normals and Tumors ################################################################
 
 	if(matched) {
-
 		
-		normalAllelicCounts = CollectAllelicCounts(crossed.filter { it[1] == 'Normal' }, reference, reference_index, reference_dict).
-		tumorAllelicCounts = CollectAllelicCounts(crossed.filter { it[1] == 'Tumor' }, reference, reference_index, reference_dict)
+		AllelicCounts = CollectAllelicCounts(crossed, reference, reference_index, reference_dict)
+		tumorAllelicCounts = AllelicCounts.filter { it[1] == 'Tumor' }
+		normalAllelicCounts = AllelicCounts.filter { it[1] == 'Normal' }
 
-		tumorJoinNormal = tumorAllelicCounts.out.join(normalAlleliccounts.out, remainder: false, by : [0,1])
-				  						       		  .map { r -> [r[2], r[3], r[5]] }
-		
-		denoisedJoinAllelic = DenoiseReadCounts.out.join(tumorJoinNormal)
+		tumorJoinNormal = tumorAllelicCounts.join(normalAllelicCounts, remainder: false, by : [0,2])
+				  						       		  .map { r -> [r[3], r[4], r[7]] }
+
+
+		denoisedJoinAllelic = DenoiseReadCounts.out.map{ r -> [r[0], r[2], r[3]] }.join(tumorJoinNormal)
+
+//        tuple val(sampleID), file(standard), file(denoised), file(allelic), file(normal_allelic)
 
 		modeled = ModelSegmentsMatched(denoisedJoinAllelic)
 	}
 	else {	
-	        AllelicCounts = CollectAllelicCounts(crossed, reference, reference_index, reference_dict)
+
+	        AllelicCounts = CollectAllelicCounts(crossed.filter { it[1] == 'Tumor' }, reference, reference_index, reference_dict)
        	        modeled = ModelSegments(DenoiseReadCounts.out.join(AllelicCounts))
 	}
 
