@@ -118,9 +118,9 @@ process CollectReadCounts {
 
 process CreateReadCountPanelOfNormals{
         container 'broadinstitute/gatk:4.1.4.1'
-	label 'large'
-        errorStrategy { sleep(Math.pow(2, task.attempt) * 200 as long); return 'retry' }
-        maxRetries 100
+	label 'small'
+        
+        
 
         input:
 	tuple val(kitID), file(normal_list), file(annotated)
@@ -299,8 +299,8 @@ process ModelSegments{
 process ModelSegmentsMatched {
 	container 'broadinstitute/gatk:4.1.4.1'
 	label 'large'
-//        errorStrategy { sleep(Math.pow(2, task.attempt) * 200 as long); return 'retry' }
-//        maxRetries 100
+        errorStrategy { sleep(Math.pow(2, task.attempt) * 200 as long); return 'retry' }
+        maxRetries 100
 
         input:
         tuple val(sampleID), file(standard), file(denoised), file(allelic), file(normal_allelic)
@@ -313,7 +313,7 @@ process ModelSegmentsMatched {
         """
         mkdir ${sampleID}_modelSeg
 
-        gatk --java-options "-Xmx30G" ModelSegments \
+        gatk --java-options "-Xmx42G" ModelSegments \
           --denoised-copy-ratios ${denoised} \
           --output-prefix ${sampleID} \
 	  --normal-allelic-counts ${normal_allelic} \
@@ -351,6 +351,7 @@ process CallCopyRatioSegments {
 
 process PlotModeledSegments {
         container 'broadinstitute/gatk:4.1.4.1'
+	label 'small'
         errorStrategy { sleep(Math.pow(2, task.attempt) * 200 as long); return 'retry' }
         maxRetries 100
 
