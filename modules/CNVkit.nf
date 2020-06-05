@@ -179,13 +179,16 @@ process callCNV {
         label 'small'
 
         input:
-        tuple val(sampleID), val(patientID), path(cns)
+        tuple val(sampleID), val(patientID), path(cns), path(vcf)
 
         output:
         tuple val("${sampleID}"), val("${patientID}"), path("${sampleID}_calls.cns")
 
         """
-        cnvkit.py call -m threshold ${cns} -o ${sampleID}_calls.cns
+	cp -L ${vcf} ${sampleID}.vcf.gz
+	#gunzip ${sampleID}.vcf.gz 
+        cnvkit.py call -y -m threshold ${cns} -o ${sampleID}_calls.cns 
+	#-v {sampleID}.vcf -z 0.25
 
         """
 
@@ -203,12 +206,13 @@ process images {
 	tuple val(sampleID), val(patientID), path(cnr), path(cns)
 
 	output:
-        tuple val("${sampleID}"), val("${patientID}"), path("${sampleID}-diagram.pdf"), path("${sampleID}-scatter-genes.pdf")
+        tuple val("${sampleID}"), val("${patientID}"), path("${sampleID}-diagram.pdf"), path("${sampleID}-scatter-genes.pdf"), path("${sampleID}-scatter.pdf")
 
 	
 	"""
 	cnvkit.py diagram ${cnr} -s ${cns} -o ${sampleID}-diagram.pdf
 	cnvkit.py scatter -s *.cn{s,r} -l ${params.coords} -w 1000000 -o ${sampleID}-scatter-genes.pdf 
+	cnvkit.py scatter -s *.cn{s,r} -o ${sampleID}-scatter.pdf
 
 	"""
 }
@@ -221,10 +225,10 @@ workflow CNVkit_wf {
          beds_ch
          reference
 	 refFlat
+	 vcfs_ch
 		
 	 
 	 main:
-
 	 access(reference)
  	 target(beds_ch, refFlat)
 
@@ -249,7 +253,7 @@ workflow CNVkit_wf {
 	 segment(fix.out)
 	 center(segment.out)
 	 center.out.view()
-	 callCNV(center.out)
+	 callCNV(center.out.join(vcfs_ch))
 	 images(fix.out.join(callCNV.out, by : [0,1]))
 
 	 
@@ -277,12 +281,17 @@ workflow {
 	    .splitCsv(header:true)
 	    .map{ row-> tuple(row.sampleID, row.kitID, row.type, row.patientID, file(row.bam)) }
 
+	vcfs_ch = Channel
+            .fromPath(params.input_vcf)
+            .splitCsv(header:true)
+            .map{ row-> tuple(row.sampleID, file(row.vcf)) }
+
 	reference = file(params.reference)
 	refFlat = file(params.refFlat)
 
 	 main:
 
-	 CNVkit_wf(bams_ch, beds_ch, reference, refFlat)
+	 CNVkit_wf(bams_ch, beds_ch, reference, refFlat, vcfs_ch)
 	 
 	 publish: 
          CNVkit_wf.out.fixed to : "${params.output_folder}/fixed/"

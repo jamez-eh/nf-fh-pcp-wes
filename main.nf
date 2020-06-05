@@ -1,6 +1,6 @@
 nextflow.preview.dsl=2
 
-
+params.align = false
 params.run = "none"
 params.bwa_index = null
 
@@ -364,27 +364,34 @@ workflow {
 	 contig_dict = file(params.contig_dict)
 	 common_variants = file(params.common_variants)
 	 common_variants_index = file(params.common_variants_index)
-
+	 clinvar = file(params.clinvar)
 	 
-
+	if(params.align) {
 	fqs_ch = Channel
 	    .fromPath(params.input_csv)
 	    .splitCsv(header:true)
 	    .map{ row-> tuple(row.sampleID, row.kitID, row.type, row.patient, file(row.R1), file(row.R2)) }
 
+        bam_bam = Channel.empty()
+	}
+	else {
+	fqs_ch = Channel.empty()
+	bam_bam = Channel
+            .fromPath(params.input_csv)
+            .splitCsv(header:true)
+            .map{ row-> tuple(row.sampleID, row.kitID, row.type, row.patientID, file(row.bam)) }
+	}
 	if (params.cnv || params.mutect2) {
 	beds_ch = Channel
        	     .fromPath(params.input_beds)
              .splitCsv(header:true)
              .map{ row-> tuple(row.kitID, file(row.capture_bed)) }
 	}
-        bam_bam = Channel.empty()
+
 
 
 	main:
-
-
-
+	if(params.align){
 	fqs_ch.branch {
                 Normal : it[2] == 'Normal'
                 Tumor : it[2] == 'Tumor'
@@ -408,27 +415,32 @@ workflow {
 
 	vanilla_align(fqs_mixed)
 
-	bam_bam = vanilla_align.out
-
+	bam_bam = vanilla_align.out.recal_bams
+	}
+	else {
+	vanilla_align = Channel.empty()
+		pdx = Channel.empty()
+	}
 
 
 	//gatk_single_snp_wf(vanilla_align.out.recal_bams)
 
 
-	//CNVkit_wf(vanilla_align.out.recal_bams, beds_ch, reference, reference_dict, reference_index, common_variants, common_variants_index)
-	
+
+	bam_bam.view()
 	if(params.cnv){
         gatkCNV_wf(beds_ch, reference, reference_dict, reference_index, contig_dict, vanilla_align.out)
 	}
 	if(params.mutect2){
-	mutect2_wf(vanilla_align.out.recal_bams, beds_ch, reference, reference_dict, reference_index, common_variants, common_variants_index)
+	mutect2_wf(bam_bam, beds_ch, reference, reference_dict, reference_index, common_variants, common_variants_index, clinvar)
 	}
-	
+	mutect2_wf.out.filteredVCF.view()	
+//	CNVkit_wf(bam_bam, beds_ch, reference, reference_dict, reference_index, common_variants, common_variants_index, mutect2_wf.out.filteredVCF)
 
-	publish:
-	pdx.mixed_bams to : "${params.output_folder}/mixed_bams/"
-	vanilla_align.out.raw_bams to: "${params.output_folder}raw/"
-	vanilla_align.out.recal_bams to: "${params.output_folder}recal_bams/"
+//	publish:
+//	pdx.mixed_bams to : "${params.output_folder}/mixed_bams/"
+//	vanilla_align.out.raw_bams to: "${params.output_folder}raw/"
+//	vanilla_align.out.recal_bams to: "${params.output_folder}recal_bams/"
 //	gatkCNV_wf.out.plots to : "./lucap_plots/"	  
 //	gatkCNV_wf.out.plots to : "${params.output_folder}denoised/"	  
  //	gatkCNV_wf.out.modelsegs to : "${params.output_folder}modelsegs"	  
